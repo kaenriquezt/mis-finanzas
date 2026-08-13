@@ -2,12 +2,12 @@ import React, { useState, useMemo } from "react";
 import { useMovimientos } from "../hooks/useFirestore";
 import { CATEGORIAS, TIPO_MOVIMIENTO } from "../data/constants";
 import { formatCOP, mesActual, filtrarPorPeriodo } from "../utils/helpers";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const MESES = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
 export default function Flujo() {
-  const { movimientos, loading } = useMovimientos();
+  const { movimientos } = useMovimientos();
   const [filtro, setFiltro] = useState({ tipo: "mes", valor: mesActual() });
   const [rangoCustom, setRangoCustom] = useState({ desde: "", hasta: "" });
 

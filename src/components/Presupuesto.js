@@ -53,7 +53,8 @@ export default function Presupuesto() {
       });
     });
     return lista;
-  }, [gastosPorSubcat, presupuestos, mes]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [gastosPorSubcat, presupuestos, mes]);
 
   const getColor = (pct) => {
     if (pct > 100) return { barra: "#E24B4A", fondo: "#FCEBEB", texto: "#A32D2D" };
