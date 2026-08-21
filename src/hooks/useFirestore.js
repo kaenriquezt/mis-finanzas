@@ -105,12 +105,25 @@ export function useAportesPeriahorro() {
       ...aporte,
       fecha: new Date().toISOString()
     });
-    // Actualizar saldo de la cuenta perriahorro
+    await recalcularSaldoPerriahorro();
+  };
+
+  const editarAporte = async (id, cambios) => {
+    await updateDoc(doc(db, "perriahorro", id), cambios);
+    await recalcularSaldoPerriahorro();
+  };
+
+  const eliminarAporte = async (id) => {
+    await deleteDoc(doc(db, "perriahorro", id));
+    await recalcularSaldoPerriahorro();
+  };
+
+  const recalcularSaldoPerriahorro = async () => {
     const cuentaRef = doc(db, "cuentas", "perriahorro");
     const snap = await getDocs(collection(db, "perriahorro"));
-    const total = snap.docs.reduce((sum, d) => sum + (d.data().monto || 0), 0) + aporte.monto;
+    const total = snap.docs.reduce((sum, d) => sum + (d.data().monto || 0), 0);
     await updateDoc(cuentaRef, { saldo: total });
   };
 
-  return { aportes, agregarAporte };
+  return { aportes, agregarAporte, editarAporte, eliminarAporte };
 }
