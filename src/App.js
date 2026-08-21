@@ -1,10 +1,13 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./index.css";
 import Patrimonio from "./components/Patrimonio";
 import Flujo from "./components/Flujo";
 import Presupuesto from "./components/Presupuesto";
 import Movimientos from "./components/Movimientos";
+import Login from "./components/Login";
 import { useCuentas } from "./hooks/useFirestore";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "./firebase";
 
 const TABS = [
   { id: "patrimonio", label: "Patrimonio" },
@@ -14,6 +17,35 @@ const TABS = [
 ];
 
 export default function App() {
+  const [usuario, setUsuario] = useState(null);
+  const [verificando, setVerificando] = useState(true);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUsuario(u);
+      setVerificando(false);
+    });
+    return () => unsub();
+  }, []);
+
+  if (verificando) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "var(--fondo)", display: "flex",
+        alignItems: "center", justifyContent: "center",
+        color: "var(--texto-suave)", fontSize: 14
+      }}>
+        Cargando...
+      </div>
+    );
+  }
+
+  if (!usuario) return <Login />;
+
+  return <FinanzasApp usuario={usuario} />;
+}
+
+function FinanzasApp({ usuario }) {
   const [tabActiva, setTabActiva] = useState("patrimonio");
   const { cuentas, loading, actualizarSaldo, agregarCuenta, eliminarCuenta } = useCuentas();
 
@@ -28,7 +60,13 @@ export default function App() {
         zIndex: 50
       }}>
         <div style={{ maxWidth: 840, margin: "0 auto", padding: "0 1.25rem" }}>
-          <div style={{ paddingTop: "1rem", paddingBottom: "0.25rem" }}>
+          <div style={{
+            paddingTop: "1rem",
+            paddingBottom: "0.25rem",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
             <h1 style={{
               fontFamily: "'Lora', serif",
               fontSize: 20,
@@ -37,6 +75,14 @@ export default function App() {
             }}>
               mis finanzas
             </h1>
+            <button
+              className="btn-ghost"
+              style={{ fontSize: 13 }}
+              onClick={() => signOut(auth)}
+              title={usuario.email}
+            >
+              Salir
+            </button>
           </div>
           {/* Tabs */}
           <nav style={{ display: "flex", gap: 2, marginTop: "0.25rem" }}>
