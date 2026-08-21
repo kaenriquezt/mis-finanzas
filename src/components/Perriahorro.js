@@ -5,9 +5,11 @@ import { formatCOP, formatFecha, generarImagenPerriahorro } from "../utils/helpe
 const MIEMBROS = ["Yo", "So", "Ale", "Yk"];
 
 export default function Perriahorro({ onCerrar }) {
-  const { aportes, agregarAporte } = useAportesPeriahorro();
+  const { aportes, agregarAporte, editarAporte, eliminarAporte } = useAportesPeriahorro();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [nuevoAporte, setNuevoAporte] = useState({ miembro: "Yo", monto: "", nota: "" });
+  const [editandoId, setEditandoId] = useState(null);
+  const [edicion, setEdicion] = useState({ miembro: "Yo", monto: "", nota: "" });
 
   const saldoTotal = useMemo(() =>
     aportes.reduce((sum, a) => sum + (a.monto || 0), 0), [aportes]);
@@ -39,6 +41,25 @@ export default function Perriahorro({ onCerrar }) {
     });
     setNuevoAporte({ miembro: "Yo", monto: "", nota: "" });
     setMostrarForm(false);
+  };
+
+  const iniciarEdicion = (aporte) => {
+    setEditandoId(aporte.id);
+    setEdicion({ miembro: aporte.miembro, monto: String(aporte.monto), nota: aporte.nota || "" });
+  };
+
+  const guardarEdicion = async () => {
+    if (!edicion.monto) return;
+    await editarAporte(editandoId, {
+      miembro: edicion.miembro,
+      monto: parseFloat(edicion.monto),
+      nota: edicion.nota
+    });
+    setEditandoId(null);
+  };
+
+  const handleEliminar = async (id) => {
+    await eliminarAporte(id);
   };
 
   return (
@@ -140,26 +161,81 @@ export default function Perriahorro({ onCerrar }) {
             <p className="etiqueta" style={{ marginBottom: 8 }}>Historial</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
               {aportes.slice(0, 20).map(a => (
-                <div key={a.id} style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "8px 0",
-                  borderBottom: "1px solid var(--borde)"
-                }}>
-                  <div>
-                    <span style={{ fontSize: 14, fontWeight: 500 }}>{a.miembro}</span>
-                    {a.nota && <span style={{ fontSize: 12, color: "var(--texto-suave)", marginLeft: 6 }}>{a.nota}</span>}
+                editandoId === a.id ? (
+                  <div key={a.id} style={{
+                    background: "var(--fondo)",
+                    borderRadius: "var(--radio)",
+                    padding: "0.75rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8
+                  }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <select
+                        value={edicion.miembro}
+                        onChange={e => setEdicion(p => ({ ...p, miembro: e.target.value }))}
+                      >
+                        {MIEMBROS.map(m => <option key={m}>{m}</option>)}
+                      </select>
+                      <input
+                        type="number"
+                        value={edicion.monto}
+                        onChange={e => setEdicion(p => ({ ...p, monto: e.target.value }))}
+                        autoFocus
+                      />
+                    </div>
+                    <input
+                      placeholder="Nota (opcional)"
+                      value={edicion.nota}
+                      onChange={e => setEdicion(p => ({ ...p, nota: e.target.value }))}
+                    />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button className="btn-primario" style={{ flex: 1, padding: "6px 12px", fontSize: 13 }} onClick={guardarEdicion}>
+                        Guardar
+                      </button>
+                      <button className="btn-secundario" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => setEditandoId(null)}>
+                        Cancelar
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <span className="numero-grande" style={{ fontSize: 15, color: "var(--positivo)" }}>
-                      +{formatCOP(a.monto)}
-                    </span>
-                    <span style={{ fontSize: 11, color: "var(--texto-muy-suave)" }}>
-                      {formatFecha(a.fecha)}
-                    </span>
+                ) : (
+                  <div key={a.id} style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 0",
+                    borderBottom: "1px solid var(--borde)"
+                  }}>
+                    <div>
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>{a.miembro}</span>
+                      {a.nota && <span style={{ fontSize: 12, color: "var(--texto-suave)", marginLeft: 6 }}>{a.nota}</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span className="numero-grande" style={{ fontSize: 15, color: "var(--positivo)" }}>
+                        +{formatCOP(a.monto)}
+                      </span>
+                      <span style={{ fontSize: 11, color: "var(--texto-muy-suave)" }}>
+                        {formatFecha(a.fecha)}
+                      </span>
+                      <button
+                        className="btn-ghost"
+                        style={{ padding: "3px 6px", fontSize: 12 }}
+                        onClick={() => iniciarEdicion(a)}
+                        title="Editar"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="btn-ghost"
+                        style={{ padding: "3px 6px", fontSize: 12, color: "var(--negativo)" }}
+                        onClick={() => handleEliminar(a.id)}
+                        title="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )
               ))}
             </div>
           </div>
