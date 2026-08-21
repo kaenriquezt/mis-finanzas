@@ -1,8 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
-// 🔧 REEMPLAZA estos valores con los de tu proyecto en Firebase Console
-// Ve a: https://console.firebase.google.com → Tu proyecto → Configuración → Tus apps
 const firebaseConfig = {
   apiKey: "AIzaSyD_fGP0NGFyoDZIP6uujj43qF-fu25ZfuI",
   authDomain: "mis-finanzas-c94de.firebaseapp.com",
@@ -14,3 +13,5 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
