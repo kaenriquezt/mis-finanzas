@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useMovimientos, useCuentas } from "../hooks/useFirestore";
-import { CATEGORIAS, TIPO_MOVIMIENTO } from "../data/constants";
-import { formatCOP, formatFecha, mesActual, filtrarPorPeriodo } from "../utils/helpers";
+import { CATEGORIAS, TIPO_MOVIMIENTO, CUENTAS_CON_USD } from "../data/constants";
+import { formatCOP, formatUSD, formatFecha, mesActual, filtrarPorPeriodo, obtenerTasaCambio } from "../utils/helpers";
 
 const TIPOS_MOV = [
   { id: TIPO_MOVIMIENTO.INGRESO, label: "Ingreso" },
@@ -13,11 +13,19 @@ const TIPOS_MOV = [
 ];
 
 export default function Movimientos({ cuentas }) {
-  const { movimientos, agregarMovimiento, eliminarMovimiento } = useMovimientos();
+  const { movimientos, agregarMovimiento, editarMovimiento, eliminarMovimiento } = useMovimientos();
   const { actualizarSaldo } = useCuentas();
   const [mostrarForm, setMostrarForm] = useState(false);
   const [filtro, setFiltro] = useState({ tipo: "mes", valor: mesActual() });
   const [busqueda, setBusqueda] = useState("");
+  const [trm, setTrm] = useState(null);
+  const [ajustandoId, setAjustandoId] = useState(null);
+  const [tasaAjuste, setTasaAjuste] = useState("");
+
+  // TRM del día, usada como estimado inicial
+  useEffect(() => {
+    obtenerTasaCambio().then(setTrm);
+  }, []);
 
   const [form, setForm] = useState({
     tipo: TIPO_MOVIMIENTO.EGRESO,
@@ -27,6 +35,8 @@ export default function Movimientos({ cuentas }) {
     cuentaDestino: "",
     categoriaGrupo: "",
     categoriaId: "",
+    moneda: "COP",
+    tasa: "",
     fecha: new Date().toISOString().slice(0, 10)
   });
 
@@ -55,11 +65,24 @@ export default function Movimientos({ cuentas }) {
 
   const handleGuardar = async () => {
     if (!form.monto || !form.cuentaOrigen) return;
-    const monto = parseFloat(form.monto);
-    if (!(monto > 0)) return;
+    const montoIngresado = parseFloat(form.monto);
+    if (!(montoIngresado > 0)) return;
+
+    // Si el movimiento es en dólares, se convierte a COP.
+    // Se guarda el USD original y la tasa usada para poder ajustarla después.
+    const esUSD = form.moneda === "USD";
+    const tasa = esUSD ? parseFloat(form.tasa) : null;
+    if (esUSD && !(tasa > 0)) return;
+
+    const monto = esUSD ? Math.round(montoIngresado * tasa) : montoIngresado;
 
     // Guardar movimiento
-    await agregarMovimiento({ ...form, monto });
+    await agregarMovimiento({
+      ...form,
+      monto,
+      montoUSD: esUSD ? montoIngresado : null,
+      tasa: esUSD ? tasa : null
+    });
 
     // Actualizar saldos según tipo
     const origen = cuentas.find(c => c.id === form.cuentaOrigen);
@@ -98,10 +121,39 @@ export default function Movimientos({ cuentas }) {
     setForm({
       tipo: TIPO_MOVIMIENTO.EGRESO, monto: "", descripcion: "",
       cuentaOrigen: "", cuentaDestino: "", categoriaGrupo: "", categoriaId: "",
+      moneda: "COP", tasa: "",
       fecha: new Date().toISOString().slice(0, 10)
     });
     setMostrarForm(false);
   };
+
+  // Ajusta la tasa de un movimiento en dólares cuando llega el extracto real.
+  // Recalcula el COP y aplica solo la diferencia al saldo de la cuenta.
+  const guardarAjusteTasa = async (mov) => {
+    const nuevaTasa = parseFloat(tasaAjuste);
+    if (!(nuevaTasa > 0) || !mov.montoUSD) return;
+
+    const nuevoCOP = Math.round(mov.montoUSD * nuevaTasa);
+    const diferencia = nuevoCOP - mov.monto;
+
+    await editarMovimiento(mov.id, { monto: nuevoCOP, tasa: nuevaTasa });
+
+    if (diferencia !== 0) {
+      const cuenta = cuentas.find(c => c.id === mov.cuentaOrigen);
+      const efecto = mov.tipo === TIPO_MOVIMIENTO.INGRESO || mov.tipo === TIPO_MOVIMIENTO.COBRO ? +1 : -1;
+      await aplicarEfecto(cuenta, efecto, diferencia);
+    }
+
+    setAjustandoId(null);
+  };
+
+  // Cuenta seleccionada en el formulario y si admite dólares
+  const cuentaSeleccionada = cuentas.find(c => c.id === form.cuentaOrigen);
+  const permiteUSD = cuentaSeleccionada && CUENTAS_CON_USD.includes(cuentaSeleccionada.id);
+  const esFormUSD = permiteUSD && form.moneda === "USD";
+  const previewCOP = esFormUSD && form.monto && form.tasa
+    ? Math.round(parseFloat(form.monto) * parseFloat(form.tasa))
+    : null;
 
   const necesitaDestino = [TIPO_MOVIMIENTO.TRASLADO, TIPO_MOVIMIENTO.PAGO_DEUDA, TIPO_MOVIMIENTO.COBRO, TIPO_MOVIMIENTO.PRESTAMO].includes(form.tipo);
   const esIngreso = form.tipo === TIPO_MOVIMIENTO.INGRESO;
@@ -156,6 +208,43 @@ export default function Movimientos({ cuentas }) {
           movimientosFiltrados.map((mov, i) => {
             const esPos = mov.tipo === TIPO_MOVIMIENTO.INGRESO || mov.tipo === TIPO_MOVIMIENTO.COBRO;
             const esNeu = mov.tipo === TIPO_MOVIMIENTO.TRASLADO || mov.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA || mov.tipo === TIPO_MOVIMIENTO.PRESTAMO;
+            if (ajustandoId === mov.id) {
+              return (
+                <div key={mov.id} style={{
+                  padding: "0.875rem 1.25rem",
+                  background: "var(--fondo)",
+                  borderBottom: "1px solid var(--borde)"
+                }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>
+                    {mov.descripcion || "Movimiento"} · {formatUSD(mov.montoUSD)}
+                  </p>
+                  <p style={{ fontSize: 11, color: "var(--texto-muy-suave)", marginBottom: 8 }}>
+                    Escribe la tasa que te cobró el banco según el extracto.
+                  </p>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <input
+                      type="number"
+                      value={tasaAjuste}
+                      onChange={e => setTasaAjuste(e.target.value)}
+                      style={{ flex: 1 }}
+                      autoFocus
+                      onKeyDown={e => e.key === "Enter" && guardarAjusteTasa(mov)}
+                    />
+                    <button className="btn-primario" style={{ padding: "8px 14px", fontSize: 13 }}
+                      onClick={() => guardarAjusteTasa(mov)}>Guardar</button>
+                    <button className="btn-secundario" style={{ padding: "8px 12px", fontSize: 13 }}
+                      onClick={() => setAjustandoId(null)}>Cancelar</button>
+                  </div>
+                  {parseFloat(tasaAjuste) > 0 && (
+                    <p style={{ fontSize: 12, color: "var(--texto-suave)", marginTop: 8 }}>
+                      Quedaría en {formatCOP(Math.round(mov.montoUSD * parseFloat(tasaAjuste)))}
+                      {" "}(antes {formatCOP(mov.monto)})
+                    </p>
+                  )}
+                </div>
+              );
+            }
+
             return (
               <div key={mov.id} style={{
                 display: "flex",
@@ -174,12 +263,27 @@ export default function Movimientos({ cuentas }) {
                   </p>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <p className="numero-grande" style={{
-                    fontSize: 16,
-                    color: esPos ? "var(--positivo)" : esNeu ? "var(--texto-suave)" : "var(--negativo)"
-                  }}>
-                    {esPos ? "+" : esNeu ? "" : "−"}{formatCOP(mov.monto)}
-                  </p>
+                  <div style={{ textAlign: "right" }}>
+                    <p className="numero-grande" style={{
+                      fontSize: 16,
+                      color: esPos ? "var(--positivo)" : esNeu ? "var(--texto-suave)" : "var(--negativo)"
+                    }}>
+                      {esPos ? "+" : esNeu ? "" : "−"}{formatCOP(mov.monto)}
+                    </p>
+                    {mov.montoUSD > 0 && (
+                      <p style={{ fontSize: 11, color: "var(--texto-muy-suave)" }}>
+                        {formatUSD(mov.montoUSD)} a {formatCOP(mov.tasa)}
+                      </p>
+                    )}
+                  </div>
+                  {mov.montoUSD > 0 && (
+                    <button
+                      className="btn-ghost"
+                      style={{ padding: "3px 6px", fontSize: 12 }}
+                      onClick={() => { setAjustandoId(mov.id); setTasaAjuste(String(mov.tasa || "")); }}
+                      title="Ajustar tasa del extracto"
+                    >⇄</button>
+                  )}
                   <button
                     className="btn-ghost"
                     style={{ padding: "3px 6px", fontSize: 12 }}
@@ -209,7 +313,9 @@ export default function Movimientos({ cuentas }) {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
-                  <label className="etiqueta">Monto</label>
+                  <label className="etiqueta">
+                    Monto {esFormUSD ? "(USD)" : ""}
+                  </label>
                   <input type="number" placeholder="0" value={form.monto}
                     onChange={e => setForm(p => ({ ...p, monto: e.target.value }))} />
                 </div>
@@ -227,6 +333,74 @@ export default function Movimientos({ cuentas }) {
                   {cuentasActivas.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </select>
               </div>
+
+              {permiteUSD && (
+                <div style={{
+                  background: "var(--fondo)",
+                  borderRadius: "var(--radio)",
+                  padding: "0.75rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10
+                }}>
+                  <div>
+                    <label className="etiqueta">Moneda de la compra</label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {["COP", "USD"].map(m => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={form.moneda === m ? "btn-primario" : "btn-secundario"}
+                          style={{ flex: 1, padding: "7px", fontSize: 13 }}
+                          onClick={() => setForm(p => ({
+                            ...p,
+                            moneda: m,
+                            tasa: m === "USD" && !p.tasa && trm ? String(Math.round(trm)) : p.tasa
+                          }))}
+                        >
+                          {m === "COP" ? "Pesos" : "Dólares"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {esFormUSD && (
+                    <>
+                      <div>
+                        <label className="etiqueta">Tasa de cambio</label>
+                        <input
+                          type="number"
+                          placeholder={trm ? String(Math.round(trm)) : "0"}
+                          value={form.tasa}
+                          onChange={e => setForm(p => ({ ...p, tasa: e.target.value }))}
+                        />
+                        <p style={{ fontSize: 11, color: "var(--texto-muy-suave)", marginTop: 4 }}>
+                          {trm
+                            ? `TRM de hoy: ${formatCOP(trm)}. El banco usa su propia tasa — puedes ajustarla después con el botón ⇄ en el historial.`
+                            : "Consultando TRM..."}
+                        </p>
+                      </div>
+                      {previewCOP > 0 && (
+                        <div style={{
+                          background: "var(--acento-suave)",
+                          borderRadius: "var(--radio)",
+                          padding: "0.6rem 0.85rem",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center"
+                        }}>
+                          <span style={{ fontSize: 12, color: "var(--texto-suave)" }}>
+                            Se registrará como
+                          </span>
+                          <span className="numero-grande" style={{ fontSize: 17, color: "var(--acento-hover)" }}>
+                            {formatCOP(previewCOP)}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {necesitaDestino && (
                 <div>
