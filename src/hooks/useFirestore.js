@@ -59,11 +59,15 @@ export function useMovimientos() {
     });
   };
 
+  const editarMovimiento = async (id, cambios) => {
+    await updateDoc(doc(db, "movimientos", id), cambios);
+  };
+
   const eliminarMovimiento = async (id) => {
     await deleteDoc(doc(db, "movimientos", id));
   };
 
-  return { movimientos, loading, agregarMovimiento, eliminarMovimiento };
+  return { movimientos, loading, agregarMovimiento, editarMovimiento, eliminarMovimiento };
 }
 
 export function usePresupuestos() {
