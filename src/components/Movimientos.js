@@ -39,34 +39,59 @@ export default function Movimientos({ cuentas }) {
     ? CATEGORIAS.egresos.find(g => g.id === form.categoriaGrupo)?.subcategorias || []
     : [];
 
+  // Aplica un cambio de saldo respetando el tipo de cuenta.
+  // efecto = +1 si el movimiento AUMENTA el patrimonio a través de esa cuenta,
+  //          -1 si lo DISMINUYE.
+  // Las cuentas de deuda (tarjetas, créditos) guardan el saldo como magnitud
+  // positiva, así que el signo se invierte: gastar con la tarjeta sube la deuda.
+  const aplicarEfecto = async (cuenta, efecto, monto) => {
+    if (!cuenta) return;
+    const esDeuda = cuenta.tipo === "credito" || cuenta.tipo === "deuda";
+    const nuevoSaldo = esDeuda
+      ? Math.max(0, cuenta.saldo - efecto * monto)
+      : cuenta.saldo + efecto * monto;
+    await actualizarSaldo(cuenta.id, nuevoSaldo);
+  };
+
   const handleGuardar = async () => {
     if (!form.monto || !form.cuentaOrigen) return;
     const monto = parseFloat(form.monto);
+    if (!(monto > 0)) return;
 
     // Guardar movimiento
     await agregarMovimiento({ ...form, monto });
 
     // Actualizar saldos según tipo
     const origen = cuentas.find(c => c.id === form.cuentaOrigen);
+    const destino = cuentas.find(c => c.id === form.cuentaDestino);
+
     if (origen) {
       if (form.tipo === TIPO_MOVIMIENTO.INGRESO) {
-        await actualizarSaldo(origen.id, origen.saldo + monto);
-      } else if (form.tipo === TIPO_MOVIMIENTO.EGRESO || form.tipo === TIPO_MOVIMIENTO.PRESTAMO) {
-        await actualizarSaldo(origen.id, origen.saldo - monto);
-      } else if (form.tipo === TIPO_MOVIMIENTO.TRASLADO || form.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA) {
-        await actualizarSaldo(origen.id, origen.saldo - monto);
-        const destino = cuentas.find(c => c.id === form.cuentaDestino);
-        if (destino) {
-          if (form.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA) {
-            await actualizarSaldo(destino.id, Math.max(0, destino.saldo - monto));
-          } else {
-            await actualizarSaldo(destino.id, destino.saldo + monto);
-          }
-        }
+        await aplicarEfecto(origen, +1, monto);
+
+      } else if (form.tipo === TIPO_MOVIMIENTO.EGRESO) {
+        // Gasto real: baja el efectivo, o sube la deuda si se pagó con tarjeta
+        await aplicarEfecto(origen, -1, monto);
+
+      } else if (form.tipo === TIPO_MOVIMIENTO.PRESTAMO) {
+        // Sale plata pero sigue siendo tuya: si eliges cuenta por cobrar,
+        // el patrimonio queda igual
+        await aplicarEfecto(origen, -1, monto);
+        await aplicarEfecto(destino, +1, monto);
+
+      } else if (form.tipo === TIPO_MOVIMIENTO.TRASLADO) {
+        await aplicarEfecto(origen, -1, monto);
+        await aplicarEfecto(destino, +1, monto);
+
+      } else if (form.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA) {
+        // Sale de ahorros y reduce la deuda: patrimonio neto no cambia
+        await aplicarEfecto(origen, -1, monto);
+        await aplicarEfecto(destino, +1, monto);
+
       } else if (form.tipo === TIPO_MOVIMIENTO.COBRO) {
-        await actualizarSaldo(origen.id, origen.saldo + monto);
-        const cuentaCobrar = cuentas.find(c => c.id === form.cuentaDestino);
-        if (cuentaCobrar) await actualizarSaldo(cuentaCobrar.id, Math.max(0, cuentaCobrar.saldo - monto));
+        // Entra la plata y baja la cuenta por cobrar
+        await aplicarEfecto(origen, +1, monto);
+        await aplicarEfecto(destino, -1, monto);
       }
     }
 
@@ -78,7 +103,7 @@ export default function Movimientos({ cuentas }) {
     setMostrarForm(false);
   };
 
-  const necesitaDestino = [TIPO_MOVIMIENTO.TRASLADO, TIPO_MOVIMIENTO.PAGO_DEUDA, TIPO_MOVIMIENTO.COBRO].includes(form.tipo);
+  const necesitaDestino = [TIPO_MOVIMIENTO.TRASLADO, TIPO_MOVIMIENTO.PAGO_DEUDA, TIPO_MOVIMIENTO.COBRO, TIPO_MOVIMIENTO.PRESTAMO].includes(form.tipo);
   const esIngreso = form.tipo === TIPO_MOVIMIENTO.INGRESO;
   const esEgreso = form.tipo === TIPO_MOVIMIENTO.EGRESO;
 
@@ -208,18 +233,24 @@ export default function Movimientos({ cuentas }) {
                   <label className="etiqueta">
                     {form.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA ? "Deuda a pagar" :
                       form.tipo === TIPO_MOVIMIENTO.COBRO ? "Cuenta por cobrar" :
-                        "Cuenta destino"}
+                        form.tipo === TIPO_MOVIMIENTO.PRESTAMO ? "Registrar en cuenta por cobrar" :
+                          "Cuenta destino"}
                   </label>
                   <select value={form.cuentaDestino} onChange={e => setForm(p => ({ ...p, cuentaDestino: e.target.value }))}>
                     <option value="">Selecciona...</option>
                     {cuentasActivas
                       .filter(c => form.tipo === TIPO_MOVIMIENTO.PAGO_DEUDA
                         ? (c.tipo === "credito" || c.tipo === "deuda")
-                        : form.tipo === TIPO_MOVIMIENTO.COBRO
+                        : (form.tipo === TIPO_MOVIMIENTO.COBRO || form.tipo === TIPO_MOVIMIENTO.PRESTAMO)
                           ? c.tipo === "cuentas_cobrar"
-                          : true)
+                          : c.id !== form.cuentaOrigen)
                       .map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                   </select>
+                  {form.tipo === TIPO_MOVIMIENTO.PRESTAMO && (
+                    <p style={{ fontSize: 11, color: "var(--texto-muy-suave)", marginTop: 4 }}>
+                      Créala primero en Patrimonio. Si la dejas vacía, el préstamo se descuenta del patrimonio.
+                    </p>
+                  )}
                 </div>
               )}
 
