@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useAportesPeriahorro } from "../hooks/useFirestore";
-import { formatCOP, formatFecha, generarImagenPerriahorro } from "../utils/helpers";
+import { formatCOP, formatFecha, generarImagenPerriahorro, canvasABlob } from "../utils/helpers";
 
 const MIEMBROS = ["Yo", "So", "Ale", "Yk"];
 
@@ -10,6 +10,7 @@ export default function Perriahorro({ onCerrar }) {
   const [nuevoAporte, setNuevoAporte] = useState({ miembro: "Yo", monto: "", nota: "" });
   const [editandoId, setEditandoId] = useState(null);
   const [edicion, setEdicion] = useState({ miembro: "Yo", monto: "", nota: "" });
+  const [compartiendo, setCompartiendo] = useState(false);
 
   const saldoTotal = useMemo(() =>
     aportes.reduce((sum, a) => sum + (a.monto || 0), 0), [aportes]);
@@ -23,13 +24,37 @@ export default function Perriahorro({ onCerrar }) {
     return totales;
   }, [aportes]);
 
-  const compartirEstado = () => {
-    const mesActual = new Date().toLocaleDateString("es-CO", { month: "long", year: "numeric" });
-    const dataUrl = generarImagenPerriahorro(aportesPorMiembro, saldoTotal, mesActual);
-    const link = document.createElement("a");
-    link.download = `perriahorro-${new Date().toISOString().slice(0, 7)}.png`;
-    link.href = dataUrl;
-    link.click();
+  const compartirEstado = async () => {
+    setCompartiendo(true);
+    try {
+      const mesActual = new Date().toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+      const canvas = generarImagenPerriahorro(aportesPorMiembro, saldoTotal, mesActual);
+      const blob = await canvasABlob(canvas);
+      const nombre = `perriahorro-${new Date().toISOString().slice(0, 7)}.png`;
+      const archivo = new File([blob], nombre, { type: "image/png" });
+
+      // En celular: abre el menú de compartir (WhatsApp, etc.)
+      if (navigator.canShare && navigator.canShare({ files: [archivo] })) {
+        await navigator.share({ files: [archivo], title: "Perriahorro" });
+        setCompartiendo(false);
+        return;
+      }
+
+      // En computador: descarga el archivo
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = nombre;
+      document.body.appendChild(link);   // necesario para que el click funcione
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        alert("No se pudo generar la imagen. Intenta de nuevo.");
+      }
+    }
+    setCompartiendo(false);
   };
 
   const handleAgregar = async () => {
@@ -246,8 +271,8 @@ export default function Perriahorro({ onCerrar }) {
           <button className="btn-primario" style={{ flex: 1 }} onClick={() => setMostrarForm(true)}>
             + Registrar aporte
           </button>
-          <button className="btn-secundario" onClick={compartirEstado} title="Descargar imagen para compartir">
-            💛 Compartir
+          <button className="btn-secundario" onClick={compartirEstado} disabled={compartiendo} title="Compartir estado del ahorro">
+            {compartiendo ? "..." : "💛 Compartir"}
           </button>
         </div>
       </div>
