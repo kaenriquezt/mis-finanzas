@@ -84,8 +84,12 @@ export const CATEGORIAS = {
   ]
 };
 
-export const TIPO_MOVIMIENTO = {
-  INGRESO: "ingreso",
+// Cuentas en las que se pueden registrar compras en dólares.
+// El saldo se sigue guardando en COP; se guarda además el USD original y la tasa.
+// Para habilitar otra cuenta, agrega su id a esta lista.
+export const CUENTAS_CON_USD = ["black"];
+
+export const TIPO_MOVIMIENTO = {  INGRESO: "ingreso",
   EGRESO: "egreso",
   TRASLADO: "traslado",
   PAGO_DEUDA: "pago_deuda",
